@@ -1,0 +1,11 @@
+default ns3::LteEnbNetDevice::UlBandwidth "100"
+default ns3::LteEnbNetDevice::DlBandwidth "100"
+default ns3::LteEnbNetDevice::DlEarfcn "3000"
+default ns3::LteEnbNetDevice::UlEarfcn "21000"
+global NsubbandsUser "25"
+default ns3::LteUePhy::TxPower "23"
+default ns3::LteUePhy::NoiseFigure "9"
+default ns3::LteEnbPhy::TxPower "43"
+default ns3::LteEnbPhy::NoiseFigure "5"
+global ULDL "0"
+
