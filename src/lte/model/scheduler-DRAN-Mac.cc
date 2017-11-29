@@ -37,11 +37,15 @@
 #include <ns3/scheduler-DRAN-Mac.h>
 #include <ns3/lte-vendor-specific-parameters.h>
 #include <ns3/boolean.h>
+#include <ns3/object-vector.h>
 #include <ns3/CCalculaScheduling.h>
 #include <cfloat>
 #include <set>
 #include <ns3/lte-common.h>
 #include <ns3/lte-spectrum-phy.h>
+
+#include <ns3/Objetos.h>
+
 
 namespace ns3 {
 
@@ -293,7 +297,6 @@ schedulerDRANMac::GetTypeId (void) // Permite registrar este tipo (tid: schedule
 				   UintegerValue (25),
 				   MakeUintegerAccessor (&schedulerDRANMac::m_Nsubbands_user),
 				   MakeUintegerChecker<uint8_t> ())
-
 	// Se pueden añadir aquí más atributos de los disponibles en la cabecera para que puedan ser configurables desde fuera
   ;
   return tid;
@@ -350,7 +353,7 @@ schedulerDRANMac::DoCschedCellConfigReq (const struct FfMacCschedSapProvider::Cs
   cnf.m_result = SUCCESS;
   m_cschedSapUser->CschedUeConfigCnf (cnf);
   return;
-} // Asigna los parámetros de entrada al objeto interno "m_cschedCellConfi", resize de rachAllocationMap e "informa" a través de la variable result al UE para que pueda realizar su configuración.
+} // Asigna los parámetros de entrada al objeto interno "m_cschedCellConfi", resize de rachm_dlAllocationMap e "informa" a través de la variable result al UE para que pueda realizar su configuración.
 
 void
 schedulerDRANMac::DoCschedUeConfigReq (const struct FfMacCschedSapProvider::CschedUeConfigReqParameters& params)
@@ -821,21 +824,17 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 
   int rbgSize = GetRbgSize (m_cschedCellConfig.m_dlBandwidth);
   int rbgNum = m_cschedCellConfig.m_dlBandwidth / rbgSize; // Número de subbandas
-  std::map <uint16_t, std::vector <uint16_t> > allocationMap; // RBGs map per RNTI --> nuestro usuario-subbandas_asignadas
-  std::map <uint16_t, std::vector <uint16_t> > subbandasUeMap; // subbandas_asignadas - UEs
-  std::map <uint16_t, uint16_t> subbandsAsigUEs; // Mapa con el numero de subbandas que han sido asignadas a cada UE, contador de subbandas -> no puede superar al maximo subbandas por UE
-  std::vector <bool> rbgMap;  // global RBGs map --> subbandas libres
   uint16_t rbgAllocatedNum = 0; // Número de rbgs/subbandas ya asignados (bien por retx o por tx nueva)
   std::set <uint16_t> rntiAllocated; // usuarios ya asignados
-  rbgMap.resize (m_cschedCellConfig.m_dlBandwidth / rbgSize, false); // Hacemos que el mapa de subbandas asignadas tenga la longitud del nº de subbandas y puestos los valores a false
+  m_rbgMap.resize (m_cschedCellConfig.m_dlBandwidth / rbgSize, false); // Hacemos que el mapa de subbandas asignadas tenga la longitud del nº de subbandas y puestos los valores a false
 
-  rbgMap = m_ffrSapProvider->GetAvailableDlRbg (); // El mapa de rbg disponibles viene determinado por el algoritmo de frequency reuse que se utilice
+  m_rbgMap = m_ffrSapProvider->GetAvailableDlRbg (); // El mapa de rbg disponibles viene determinado por el algoritmo de frequency reuse que se utilice
 //   De entre los 6 disponibles, en lteHelper está definido por defecto "LteFrNoOpAlgorithm" este algoritmo permite que todas las frecuencias
 //   estén disponibles para todas las celdas y así puedan asignar cualquier RB del BW total a cualquier UE
 //   Este método llama a su vez a otro DoGetAvailableDlRbg en el que si el mapa de rbg no está creado
 //   lo crea e inicializa a false, si está creado devuelve este mapa con los valores que tenga
 
-  for (std::vector<bool>::iterator it = rbgMap.begin (); it != rbgMap.end (); it++)
+  for (std::vector<bool>::iterator it = m_rbgMap.begin (); it != m_rbgMap.end (); it++)
     {
       if ((*it) == true )
         {
@@ -906,8 +905,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
   uint16_t rbStart = 0;
   rbStart = ffrRbStartOffset; // La asignación empezará en el RB calculado anteriormente a partir del cual hay nRBs libres
   std::vector <struct RachListElement_s>::iterator itRach; // Vector con los RNTI y el tamaña estimado de cada uno de los usuarios que han enviado el preamble al eNB
-//  std::cout << "Número de RNTI's for RACH Scheduling " << m_rachList.size() << std::endl;
-//  int numRNTIs=m_rachList.size();
 
   for (itRach = m_rachList.begin (); itRach != m_rachList.end (); itRach++)
     {
@@ -1099,7 +1096,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
           bool free = true;
           for (uint8_t j = 0; j < dciRbg.size (); j++)
             {
-              if (rbgMap.at (dciRbg.at (j)) == true)
+              if (m_rbgMap.at (dciRbg.at (j)) == true)
                 {
                   free = false;
                   break;
@@ -1111,7 +1108,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
               // reserve RBGs
               for (uint8_t j = 0; j < dciRbg.size (); j++)
                 {
-                  rbgMap.at (dciRbg.at (j)) = true;
+                  m_rbgMap.at (dciRbg.at (j)) = true;
                   NS_LOG_INFO ("RBG " << dciRbg.at (j) << " assigned");
                   rbgAllocatedNum++;
                 }
@@ -1124,12 +1121,12 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
               uint8_t j = 0;
               uint8_t rbgId = (dciRbg.at (dciRbg.size () - 1) + 1) % rbgNum;
               uint8_t startRbg = dciRbg.at (dciRbg.size () - 1);
-              std::vector <bool> rbgMapCopy = rbgMap;
+              std::vector <bool> m_rbgMapCopy = m_rbgMap;
               while ((j < dciRbg.size ())&&(startRbg != rbgId))
                 {
-                  if (rbgMapCopy.at (rbgId) == false)
+                  if (m_rbgMapCopy.at (rbgId) == false)
                     {
-                      rbgMapCopy.at (rbgId) = true;
+                      m_rbgMapCopy.at (rbgId) = true;
                       dciRbg.at (j) = rbgId;
                       j++;
                     }
@@ -1145,7 +1142,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
                       rbgAllocatedNum++;
                     }
                   dci.m_rbBitmap = rbgMask;
-                  rbgMap = rbgMapCopy;
+                  m_rbgMap = m_rbgMapCopy;
                   NS_LOG_INFO (this << " Move retx in RBGs " << dciRbg.size ());
                 }
               else
@@ -1249,6 +1246,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
   m_dlInfoListBuffered.clear ();
   m_dlInfoListBuffered = dlInfoListUntxed;
 
+  //////////////// EMPIEZA SCHEDULER DE DATOS ////////////////
   // Finalizado el proceso de retx HARQ. En caso de haber alcanzado el numero de subbandas maximo, pasamos la decision del scheduler a la capa MAC y terminamos.
   if (rbgAllocatedNum == rbgNum)
     {
@@ -1272,6 +1270,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 
 // Asignación de subbandas a usuarios: Vamos a distinguir entre 2 scheduler diferentes que se van a llevar a cabo
 
+  // Comprobamos si la celda considerada tiene usuarios attachados
   bool uesON = false;
   if (m_flowStatsDl.size() > 0)
 	  uesON = true;
@@ -1314,13 +1313,13 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 		  }
 
 		  // Reparto de RBs entre los UEs activos y con datos a tx
-
 		  int rbgPerTb = (cont > 0) ? ((rbgNum - rbgAllocatedNum) / cont) : 0x7FFFFFFF; // Obtenemos las subbandas por UE de entre las subbandas disponibles
 		  if (rbgPerTb == 0)
 		    {
-		      rbgPerTb = 1;                // at least 1 rbg per TB (till available resource)
+		      rbgPerTb = 1;    // al menos 1 rb por TB (till available resource)
 		    }
 
+		  // Asignacion de UE
 		  std::vector <uint16_t> temp;
 	      std::map <uint16_t, std::vector <uint16_t> >::iterator itAlloc;
 		  int rbs = 0;
@@ -1331,19 +1330,19 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 		      while (rbs < rbgPerTb)
 		        {
 
-		          if (rbgMap.at (rbgAllocated) == false)
+		          if (m_rbgMap.at (rbgAllocated) == false)
 		            {
 		              rbs++; // Contador de subbandas asignadas al UE
-		              rbgMap.at (rbgAllocated) = true;
+		              m_rbgMap.at (rbgAllocated) = true;
 		              rbgAllocatedNum++;
 		            }
 		          temp.push_back(rbgAllocated);
 		          rbgAllocated++;
 		        }
-		      itAlloc = allocationMap.find(nextRNTI);
-		      if (itAlloc == allocationMap.end())
+		      itAlloc = m_dlAllocationMap.find(nextRNTI);
+		      if (itAlloc == m_dlAllocationMap.end())
 		      {
-		          allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (nextRNTI, temp));
+		          m_dlAllocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (nextRNTI, temp));
 		      }
 		      else
 		      {
@@ -1364,8 +1363,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 			  // Reseteamos temp y cuenta de rbs
 			  temp.erase(temp.begin(),temp.end());
 			  rbs=0;
-//		      Simulator::Schedule (Simulator::Now(), &LteEnbRrc::SendHandoverRequest,nextRNTI,5);
-
 
 		  }
 		  if (cont == 0) // No UEs con datos a tx
@@ -1382,30 +1379,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 
 
 		  }
-//		  else
-//		  {
-//			  if (rbgAllocatedNum != rbgNum)
-//			  {
-//				  int dif = rbgNum - rbgAllocatedNum;
-//				  for (int i=0; i<dif; i++)
-//				  {
-//					  if (rbgMap.at(rbgAllocated)==false)
-//					  {
-//						  rbgMap.at(rbgAllocated)=true;
-//			              rbgAllocatedNum++;
-//					  }
-//				      itAlloc = allocationMap.find(uesNext.at(i));
-//				      (*itAlloc).second.push_back(rbgAllocated+i);
-//					  std::cout << "UE assigned " << uesNext.at(i) << "in subbands:  " << rbgAllocated << std::endl;
-//					  fprintf(m_pSchedFile, "-> Usuario asignado: %d Metrica: %s\n en subbandas: %d", uesNext.at(i), " NO CQI", rbgAllocated);
-//					  rbgAllocated++;
-//				  }
-//
-//			  }
-//
-//		  }
-
-
 		  // Cerramos ficheros de resultados
 		  if (m_generateFiles)
 		  {
@@ -1490,9 +1463,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 			  fclose(m_pMatrizMetricasFile);
 		  }
 
-		  /////// PRUEBA ATTACH
-
-
 
 		  // Seleccionamos aleatoriamente la subbanda de comienzo
 		  int Ksubb=rand()%rbgNum;
@@ -1506,11 +1476,11 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 			  {
 				  Ksubb=0;
 			  }
-//			  NS_LOG_INFO (this << " ALLOCATION for RBG " << Ksubb << " of " << rbgNum);
+			  NS_LOG_INFO (this << " ALLOCATION for RBG " << Ksubb << " of " << rbgNum);
 			  std::cout << " ALLOCATION for subband " << Ksubb << " of " << rbgNum << std::endl;
 			  if (m_generateFiles)
 			     fprintf(m_pSchedFileDet, "** Subbanda %d **\n", Ksubb);
-			  if (rbgMap.at (Ksubb) == false) // Hay RBG's libres, subbanda disponible
+			  if (m_rbgMap.at (Ksubb) == false) // Hay RBG's libres, subbanda disponible
 				{
 //				  fprintf(m_pSchedFile, "Disponible");
 		          std::map <uint16_t, schedulerDRANFlowPerf_t>::iterator it;
@@ -1528,11 +1498,11 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 						continue;
 
 					  // Comprobamos si el usuario tiene asignadas el maximo de subbandas
-					  itNSubbAsig=subbandsAsigUEs.find((*it).first);
-					  if (itNSubbAsig==subbandsAsigUEs.end())
+					  itNSubbAsig=m_subbandsAsigUEs.find((*it).first);
+					  if (itNSubbAsig==m_subbandsAsigUEs.end())
 					  {
 						  // Añadimos UE al mapa y ponemos contador de subbandas a cero
-						  subbandsAsigUEs.insert (std::pair <uint16_t, uint16_t > ((*it).first, 0));
+						  m_subbandsAsigUEs.insert (std::pair <uint16_t, uint16_t > ((*it).first, 0));
 					  }
 					  else
 					  {
@@ -1571,32 +1541,11 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 		              itCqi = m_a30CqiRxed.find ((*it).first);
                       if (itCqi == m_a30CqiRxed.end ())
                          {
-//                          double achievableRate = 0.0;
-//                          uint8_t mcs = 0;
                            for (uint8_t k = 0; k < nLayer; k++)
                              {
                                sbCqi.push_back (1);  // start with lowest value
                                // this UE has data to transmit
-
-//                                   for (uint8_t k = 0; k < nLayer; k++)
-//                                     {
-//                                       if (sbCqi.size () > k)
-//                                         {
-//                                           mcs = m_amc->GetMcsFromCqi (sbCqi.at (k));
-//                                         }
-//                                       else
-//                                         {
-//                                           // no info on this subband -> worst MCS
-//                                           mcs = 0;
-//                                         }
-//                                       achievableRate += ((m_amc->GetTbSizeFromMcs (mcs, rbgSize) / 8) / 0.001);   // = TB size / TTI
-//                                     }
-//                                   rcqi = achievableRate / (*itStats).second.lastAveragedThroughput;
-
                              }
-// 						  std::cout << " RNTI " << (*it).first << " MCS " << (uint32_t)mcs << " achievableRate " << achievableRate << " avgThr " << (*itStats).second.lastAveragedThroughput << " Métrica " << rcqi << std::endl;
-// 						  fprintf(m_pSchedFileDet, "RNTI %d\t MCS %d\t Achievable Rate %f\t Avg Throughput %f\t Metrica Rij %f\n", (*it).first, mcs,  achievableRate, (*itStats).second.lastAveragedThroughput, rcqi);
-
                          }
 
                       else
@@ -1604,7 +1553,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
                     	  sbCqi = (*itCqi).second.m_higherLayerSelected.at (Ksubb).m_sbCqi;
 
                       }
-
 
                       uint8_t cqi1 = sbCqi.at (0);
                       uint8_t cqi2 = 1;
@@ -1629,9 +1577,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 								  rcqiMaxSubbK = rcqi;
 								  itMax = itStats;
 								  rcqi_k = rcqiMaxSubbK;
-		//								  tpInst = achievableRate;
-		//								  avgTp = (*itStats).second.lastAveragedThroughput;
-
 								}
 							  else if (rcqi == rcqiMaxSubbK) // si los usuarios tienen igual metrica, sortear aleatoriamente
 							  {
@@ -1640,8 +1585,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 								  {
 									 case 0:
 										 itMax=itStats;
-		//										 tpInst = achievableRate;
-		//										 avgTp = (*itStats).second.lastAveragedThroughput;
 										 break;
 									 case 1:
 										 break;
@@ -1649,40 +1592,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 								  }
 
 							  }
-
-
-
-	//						  itMetricas=m_metricasUEs.find((*it).first);
-	//						  if ((*itMetricas).second.Rij.at(Ksubb) > rcqiMaxSubbK) // Busca usuario con métrica más alta en esa subbanda
-	//							{
-	//							  // Recogemos ese nuevo maximo
-	//							  rcqiMaxSubbK = (*itMetricas).second.Rij.at(Ksubb);
-	//							  itMax = itStats;
-	//							  rcqi_k = rcqiMaxSubbK;
-	//	//								  tpInst = achievableRate;
-	//	//								  avgTp = (*itStats).second.lastAveragedThroughput;
-	//
-	//							}
-	//						  else if ((*itMetricas).second.Rij.at(Ksubb) == rcqiMaxSubbK) // si los usuarios tienen igual metrica, sortear aleatoriamente
-	//						  {
-	//							  int r=rand()%2; // valor aleatorio entre 0, 1 para seleccionar que usuario escoger
-	//							  switch(r)
-	//							  {
-	//								 case 0:
-	//									 itMax=itStats;
-	//	//										 tpInst = achievableRate;
-	//	//										 avgTp = (*itStats).second.lastAveragedThroughput;
-	//									 break;
-	//								 case 1:
-	//									 break;
-	//									 // itMax= itMax;
-	//							  }
-	//
-	//						  }
-
-
-	//						  std::cout << " RNTI " << (*it).first << " MCS " << (uint32_t)(*itMetricas).second.mcs.at(Ksubb) << " achievableRate " << (*itMetricas).second.achievableRate.at(Ksubb)<< " avgThr " << (*itStats).second.lastAveragedThroughput << " Métrica " << (*itMetricas).second.Rij.at(Ksubb) << std::endl;
-	//						  fprintf(m_pSchedFileDet, "RNTI %d\t MCS %d\t Achievable Rate %f\t Avg Throughput %f\t Metrica Rij %f\n", (*it).first, (*itMetricas).second.mcs.at(Ksubb),  (*itMetricas).second.achievableRate.at(Ksubb), (*itStats).second.lastAveragedThroughput, (*itMetricas).second.Rij.at(Ksubb));
 						  }
                       }
 	               } // end bucle usuarios
@@ -1706,9 +1615,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 					  // 3- Usuario j sea el usuario con maximo Througput en la subbanda "l" / o metrica mas alta en la subbanda "l"
 
 					  std::map <uint16_t, std::vector <uint16_t> >::iterator itSubbBusc; // Mapa que almacena subbandas - ues
-					  std::map <uint16_t,SbMeasResult_s>::iterator it; // Mapa que almacena los UEs - CQIs
-					  std::map <uint16_t, std::vector <uint16_t> >::iterator itAllocMap; // Mapa en el que se tienen almacenados los UEs-subbandas asignadas
-					  std::map <uint16_t, uint16_t>::iterator itMapContSubbands; // Mapa contador de subbandas
 					  int Lsubb = 0; // posible subbanda en la que se puede obtener una mejor metrica para el UE j
 					  double rcqi_l = -1.0;
 					  int ueSubbL = 0;
@@ -1726,8 +1632,8 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 						  else
 						  {
 							  // Comprobamos si la subbanda L ha sido ya asignada
-							  itSubbBusc=subbandasUeMap.find(Subb);
-							  if (itSubbBusc == subbandasUeMap.end())
+							  itSubbBusc=m_subbandasUeMap.find(Subb);
+							  if (itSubbBusc == m_subbandasUeMap.end())
 							  {
 								  //  Si no, Obtenemos la subbanda en la que se encuentre el 2 mayor maximo para el UE j
 								  itMetricas = m_metricasUEs.find((*itMax).first);
@@ -1779,7 +1685,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 							  // Estudiamos los segundos maximos
 							  for (itMetricas = m_metricasUEs.begin(); itMetricas!=m_metricasUEs.end(); itMetricas++)
 							  {
-								  itNSubbAsig=subbandsAsigUEs.find((*itMetricas).first);
+								  itNSubbAsig=m_subbandsAsigUEs.find((*itMetricas).first);
 								  if ((*itNSubbAsig).second == m_Nsubbands_user)
 									  continue;
 								  if ((*itMetricas).first != (*itMax).first && (*itMetricas).second.Rij.at(Ksubb) > rcqi2MaxSubbK)
@@ -1800,73 +1706,10 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 							  {
 								  // Asignamos UE j a subbanda L y UE j1 a subbanda K
 								  // Usuario j:
-								  rbgMap.at (Lsubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-								  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-								  itSubbBusc = subbandasUeMap.find(Lsubb); // Buscamos subbanda L
-								  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-								  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-									{
-									  // insert new element
-									  std::vector <uint16_t> tempMap;
-									  tempMap.push_back (Lsubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-									}
-								  else
-									{
-									  (*itAllocMap).second.push_back (Lsubb);
-									}
-								  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-								  {
-									  // insert new element
-									  std::vector <uint16_t> temp2Map;
-									  temp2Map.push_back ((*itMax).first);
-									  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Lsubb, temp2Map));
-								  }
-								  else
-								  {
-									  (*itSubbBusc).second.push_back ((*itMax).first);
-
-								  }
-								  // Actualizamos contador de numero de subbandas asignadas a cada UE
-								  if(itMapContSubbands != subbandsAsigUEs.end())
-								  {
-									  (*itMapContSubbands).second ++;
-								  }
+								  AssignUe((*itMax).first,Lsubb);
 
 								  // Asignamos usuario j1
-							      rbgMap.at (Ksubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-								  itAllocMap = allocationMap.find (ue2MaxSubbK); // Buscamos usuario j1
-								  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-								  itMapContSubbands = subbandsAsigUEs.find(ue2MaxSubbK); // Buscamos UE j1
-								  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-									{
-									  // insert new element
-									  std::vector <uint16_t> tempMap;
-									  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (ue2MaxSubbK, tempMap)); // Asignamos UE-subbanda asignada
-									}
-								  else
-									{
-									  (*itAllocMap).second.push_back (Ksubb); // Encuentra al usuario ya asignado con X subbandas y le añade la nueva subbanda asignada --> Ej.: RNTI=1 ; SUBB = 3, 4, 5
-									}
-								  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-								  {
-									  // insert new element
-									  std::vector <uint16_t> temp2Map;
-									  temp2Map.push_back (ue2MaxSubbK); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map)); // Asignamos UE-subbanda asignada
-
-								  }
-								  else
-								  {
-									  (*itSubbBusc).second.push_back (ue2MaxSubbK);
-
-								  }
-								  // Actualizamos contador de numero de subbandas asignadas a cada UE
-								  if(itMapContSubbands != subbandsAsigUEs.end())
-								  {
-									  (*itMapContSubbands).second ++;
-								  }
+								  AssignUe(ue2MaxSubbK,Ksubb);
 
 								  // Actualizamos numero de subbandas asignadas
 								  rbgAllocatedNum+=2;
@@ -1883,75 +1726,12 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 							  }
 							  else if(ue2MaxSubbK > 0 && ue2MaxSubbL > 0) // UEs 2maximos tienen que tener un RNTI valido, al inicio estan inicializados a 0
 							  {
-								  // Asignamos UE j a subbanda K y UE j1 a subbanda L
+								  // Asignamos UE j a subbanda K y UE j2 a subbanda L
 								  // Usuario j:
-								  rbgMap.at (Ksubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-								  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-								  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-								  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-								  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-									{
-									  // insert new element
-									  std::vector <uint16_t> tempMap;
-									  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-									}
-								  else
-									{
-									  (*itAllocMap).second.push_back (Ksubb);
-									}
-								  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-								  {
-									  // insert new element
-									  std::vector <uint16_t> temp2Map;
-									  temp2Map.push_back ((*itMax).first);
-									  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map));
-								  }
-								  else
-								  {
-									  (*itSubbBusc).second.push_back ((*itMax).first);
-
-								  }
-								  // Actualizamos contador de numero de subbandas asignadas a cada UE
-								  if(itMapContSubbands != subbandsAsigUEs.end())
-								  {
-									  (*itMapContSubbands).second ++;
-								  }
-
+								  AssignUe((*itMax).first,Ksubb);
 
 								   //Asignamos usuario j2
-								  rbgMap.at (Lsubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-								  itAllocMap = allocationMap.find (ue2MaxSubbL); // Buscamos usuario j2
-								  itSubbBusc = subbandasUeMap.find(Lsubb); // Buscamos subbanda L
-								  itMapContSubbands = subbandsAsigUEs.find(ue2MaxSubbL); // Buscamos UE j2
-								  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-									{
-									  // insert new element
-									  std::vector <uint16_t> tempMap;
-									  tempMap.push_back (Lsubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (ue2MaxSubbL, tempMap)); // Asignamos UE-subbanda asignada
-									}
-								  else
-									{
-									  (*itAllocMap).second.push_back (Lsubb); // Encuentra al usuario ya asignado con X subbandas y le añade la nueva subbanda asignada --> Ej.: RNTI=1 ; SUBB = 3, 4, 5
-									}
-								  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-								  {
-									  // insert new element
-									  std::vector <uint16_t> temp2Map;
-									  temp2Map.push_back (ue2MaxSubbL); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Lsubb, temp2Map)); // Asignamos UE-subbanda asignada
-
-								  }
-								  else
-								  {
-									  (*itSubbBusc).second.push_back (ue2MaxSubbL);
-								  }
-								  // Actualizamos contador de numero de subbandas asignadas a cada UE
-								  if(itMapContSubbands != subbandsAsigUEs.end())
-								  {
-									  (*itMapContSubbands).second ++;
-								  }
+								  AssignUe(ue2MaxSubbL,Lsubb);
 
 								  // Actualizamos numero de subbandas asignadas
 								  rbgAllocatedNum+=2;
@@ -1971,38 +1751,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 
 								  // Asignamos UE j -> subband k
 									// 1º Asignamos usuario j
-								  rbgMap.at (Ksubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-								  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-								  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-								  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-								  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-									{
-									  // insert new element
-									  std::vector <uint16_t> tempMap;
-									  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-									  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-									}
-								  else
-									{
-									  (*itAllocMap).second.push_back (Ksubb);
-									}
-								  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-								  {
-									  // insert new element
-									  std::vector <uint16_t> temp2Map;
-									  temp2Map.push_back ((*itMax).first);
-									  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map));
-								  }
-								  else
-								  {
-									  (*itSubbBusc).second.push_back ((*itMax).first);
-
-								  }
-								  // Actualizamos contador de numero de subbandas asignadas a cada UE
-								  if(itMapContSubbands != subbandsAsigUEs.end())
-								  {
-									  (*itMapContSubbands).second ++;
-								  }
+								  AssignUe((*itMax).first,Ksubb);
 
 								  // Actualizamos numero de subbandas asignadas
 								  rbgAllocatedNum++;
@@ -2019,38 +1768,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 						  {
 							  // Asignamos UE j -> subband k
 								// 1º Asignamos usuario j
-							  rbgMap.at (Ksubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-							  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-							  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-							  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-							  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-								{
-								  // insert new element
-								  std::vector <uint16_t> tempMap;
-								  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-								  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-								}
-							  else
-								{
-								  (*itAllocMap).second.push_back (Ksubb);
-								}
-							  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-							  {
-								  // insert new element
-								  std::vector <uint16_t> temp2Map;
-								  temp2Map.push_back ((*itMax).first);
-								  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map));
-							  }
-							  else
-							  {
-								  (*itSubbBusc).second.push_back ((*itMax).first);
-
-							  }
-							  // Actualizamos contador de numero de subbandas asignadas a cada UE
-							  if(itMapContSubbands != subbandsAsigUEs.end())
-							  {
-								  (*itMapContSubbands).second ++;
-							  }
+							  AssignUe((*itMax).first,Ksubb);
 
 							  // Actualizamos numero de subbandas asignadas
 							  rbgAllocatedNum++;
@@ -2067,38 +1785,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 					  {
 						  // No hay una subbanda mejor -> Asignamos UE j a subbanda K
 							// 1º Asignamos usuario j
-						  rbgMap.at (Ksubb) = true; // Eliminamos subbanda de la lista de subbandas disponibles
-						  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-						  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-						  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-						  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-							{
-							  // insert new element
-							  std::vector <uint16_t> tempMap;
-							  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-							  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-							}
-						  else
-							{
-							  (*itAllocMap).second.push_back (Ksubb);
-							}
-						  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-						  {
-							  // insert new element
-							  std::vector <uint16_t> temp2Map;
-							  temp2Map.push_back ((*itMax).first);
-							  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map));
-						  }
-						  else
-						  {
-							  (*itSubbBusc).second.push_back ((*itMax).first);
-
-						  }
-						  // Actualizamos contador de numero de subbandas asignadas a cada UE
-						  if(itMapContSubbands != subbandsAsigUEs.end())
-						  {
-							  (*itMapContSubbands).second ++;
-						  }
+						  AssignUe((*itMax).first,Ksubb);
 
 						  // Actualizamos numero de subbandas asignadas
 						  rbgAllocatedNum++;
@@ -2116,42 +1803,8 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 				  else
 				  {
 					  // Aplicamos PF
-					  std::map <uint16_t, std::vector <uint16_t> >::iterator itSubbBusc; // Mapa que almacena subbandas - ues
-					  std::map <uint16_t,SbMeasResult_s>::iterator it; // Mapa que almacena los UEs - CQIs
-					  std::map <uint16_t, std::vector <uint16_t> >::iterator itAllocMap; // Mapa en el que se tienen almacenados los UEs-subbandas asignadas
-					  std::map <uint16_t, uint16_t>::iterator itMapContSubbands; // Mapa contador de subbandas
-
-					  itAllocMap = allocationMap.find ((*itMax).first); // Buscamos usuario j
-					  itSubbBusc = subbandasUeMap.find(Ksubb); // Buscamos subbanda K
-					  itMapContSubbands = subbandsAsigUEs.find((*itMax).first); // Buscamos UE j
-					  if (itAllocMap == allocationMap.end ()) // si no encuentra a este usuario, lo añade
-						{
-						  // insert new element
-						  std::vector <uint16_t> tempMap;
-						  tempMap.push_back (Ksubb); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
-						  allocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > ((*itMax).first, tempMap)); // Asignamos UE-subbanda asignada
-						}
-					  else
-						{
-						  (*itAllocMap).second.push_back (Ksubb);
-						}
-					  if (itSubbBusc == subbandasUeMap.end()) // Añadimos la subbanda y el usuario
-					  {
-						  // insert new element
-						  std::vector <uint16_t> temp2Map;
-						  temp2Map.push_back ((*itMax).first);
-						  subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (Ksubb, temp2Map));
-					  }
-					  else
-					  {
-						  (*itSubbBusc).second.push_back ((*itMax).first);
-
-					  }
-					  // Actualizamos contador de numero de subbandas asignadas a cada UE
-					  if(itMapContSubbands != subbandsAsigUEs.end())
-					  {
-						  (*itMapContSubbands).second ++;
-					  }
+					  // Asignamos UE j a subbanda K
+					  AssignUe((*itMax).first, Ksubb);
 
 					  // Actualizamos numero de subbandas asignadas
 					  rbgAllocatedNum++;
@@ -2169,18 +1822,6 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 				  std::cout << "Subbanda no disponible " << std::endl;
 				  if (m_generateFiles)
 				     fprintf(m_pSchedFile, "\n Subbanda no disponible, asignada a otro usuario");
-
-//				  std::vector <uint16_t> rnti_asg;
-//				  std::map <uint16_t, std::vector <uint16_t> >::iterator it;
-//				  for (it=subbandasUeMap.begin(); it!=subbandasUeMap.end(); it++) // Recorremos las subbandas del mapa
-//				  {
-//					  if(Ksubb==(*it).first)
-//					  {
-//						 rnti_asg=(*it).second;
-//						 break;
-//					  }
-//				  }
-//				  fprintf(m_pSchedFile,"\n Subbanda %d no disponible, asignada a otro usuario --> RNTI %d ", Ksubb, rnti_asg[0]);
 			  }
 
 			  // Siguiente subbanda
@@ -2219,26 +1860,20 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 		  // Imprimimos Trama y subtrama considerada
 	      fprintf(m_pSchedFile,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
 	      fprintf(m_pSchedFileDet,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
+		  fprintf(m_pMatrizCQIFile,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
+		  fprintf(m_pMatrizMetricasFile,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
 
 		  // Indicacion de que no hay usuarios
 	      fprintf(m_pSchedFile,"Celda sin usuarios\n");
 	      fprintf(m_pSchedFileDet,"Celda sin usuarios\n");
+		  fprintf(m_pMatrizCQIFile,"Celda sin usuarios\n");
+		  fprintf(m_pMatrizMetricasFile,"Celda sin usuarios\n");
 
 		  // Cerramos ficheros
 		  fclose(m_pSchedFile);
 		  fclose(m_pSchedFileDet);
-
-
-	//	  if (params.m_sfnSf>=57) // A partir de la trama 3 y subtrama 9 ya se reciben CQIs de los UEs attachados a la celda
-	//	  {
-			  fprintf(m_pMatrizCQIFile,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
-			  fprintf(m_pMatrizMetricasFile,"--------- Trama %d Subtrama %d , Celda %d ---------\n", params.m_sfnSf >> 4, 0xF & params.m_sfnSf, params.m_cellId);
-			  fprintf(m_pMatrizCQIFile,"Celda sin usuarios\n");
-			  fprintf(m_pMatrizMetricasFile,"Celda sin usuarios\n");
-			  fclose(m_pMatrizCQIFile);
-			  fclose(m_pMatrizMetricasFile);
-	//	  }
-
+		  fclose(m_pMatrizCQIFile);
+		  fclose(m_pMatrizMetricasFile);
 
 	  }
 
@@ -2261,8 +1896,8 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
   // generate the transmission opportunities by grouping the RBGs/SUBBANDS of the same RNTI and
   // creating the correspondent DCIs
 
-  std::map <uint16_t, std::vector <uint16_t> >::iterator itMap = allocationMap.begin ();
-  while (itMap != allocationMap.end ())
+  std::map <uint16_t, std::vector <uint16_t> >::iterator itMap = m_dlAllocationMap.begin ();
+  while (itMap != m_dlAllocationMap.end ())
     {
 
       // create new BuildDataListElement_s for this LC
@@ -2282,7 +1917,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
           lcActives = (uint16_t)65535; // UINT16_MAX;
         }
       // Obtenemos el numero de subbandas(RBGs) asignadas al UE
-      uint16_t RgbPerRnti = (*itMap).second.size (); // podriamos obtenerlo tambien del mapa "subbandsAsigUEs"
+      uint16_t RgbPerRnti = (*itMap).second.size (); // podriamos obtenerlo tambien del mapa "m_subbandsAsigUEs"
       // Obtenemos CQI y TX Mode del UE
       std::map <uint16_t,SbMeasResult_s>::iterator itCqi;
       itCqi = m_a30CqiRxed.find ((*itMap).first);
@@ -2458,7 +2093,7 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 
 
   // update UEs stats
-  if (allocationMap.size ()>0) // Si hay usuarios asignados, actualizamos las estadísticas de tp y bytes txed
+  if (m_dlAllocationMap.size ()>0) // Si hay usuarios asignados, actualizamos las estadísticas de tp y bytes txed
   {
 	  NS_LOG_INFO (this << " Update UEs statistics");
 	  for (itStats = m_flowStatsDl.begin (); itStats != m_flowStatsDl.end (); itStats++)
@@ -2472,12 +2107,86 @@ schedulerDRANMac::DoSchedDlTriggerReq (const struct FfMacSchedSapProvider::Sched
 		}
   }
 
+  // Reseteamos variables miembro relacionadas con la asignacion
+  Reset();
 
   // Finalmente, enviamos a la capa MAC la decisión tomada de Scheduling sobre los datos
   m_schedSapUser->SchedDlConfigInd (ret);
 
 
   return;
+}
+
+///// Metodo para asignar usuarios /////
+void
+schedulerDRANMac::AssignUe(uint16_t ue, uint16_t subband)
+{
+	// Asigna el usuario "Ue" a a la subbanda "subband"
+
+	  std::map <uint16_t, std::vector <uint16_t> >::iterator itSubbBusc; // Mapa que almacena subbandas - ues
+	  std::map <uint16_t,SbMeasResult_s>::iterator it; // Mapa que almacena los UEs - CQIs
+	  std::map <uint16_t, std::vector <uint16_t> >::iterator itAllocMap; // Mapa en el que se tienen almacenados los UEs-subbandas asignadas
+	  std::map <uint16_t, uint16_t>::iterator itMapContSubbands; // Mapa contador de subbandas
+
+	  m_rbgMap.at (subband) = true; // Eliminamos subbanda de la lista de subbandas disponibles
+	  itAllocMap = m_dlAllocationMap.find (ue); // Buscamos usuario j
+	  itSubbBusc = m_subbandasUeMap.find(subband); // Buscamos subbanda K
+	  itMapContSubbands = m_subbandsAsigUEs.find(ue); // Buscamos UE j
+	  if (itAllocMap == m_dlAllocationMap.end ()) // si no encuentra a este usuario, lo añade
+		{
+		  // insert new element
+		  std::vector <uint16_t> tempMap;
+		  tempMap.push_back (subband); // Añade el RBG a un mapa temporal para posteriormente añadirlo al mapa de asignaciones RBGs-UEs
+		  m_dlAllocationMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (ue, tempMap)); // Asignamos UE-subbanda asignada
+		}
+	  else
+		{
+		  (*itAllocMap).second.push_back (subband);
+		}
+	  if (itSubbBusc == m_subbandasUeMap.end()) // Añadimos la subbanda y el usuario
+	  {
+		  // insert new element
+		  std::vector <uint16_t> temp2Map;
+		  temp2Map.push_back (ue);
+		  m_subbandasUeMap.insert (std::pair <uint16_t, std::vector <uint16_t> > (subband, temp2Map));
+	  }
+	  else
+	  {
+		  (*itSubbBusc).second.push_back (ue);
+
+	  }
+	  // Actualizamos contador de numero de subbandas asignadas a cada UE
+	  if(itMapContSubbands != m_subbandsAsigUEs.end())
+	  {
+		  (*itMapContSubbands).second ++;
+	  }
+
+}
+
+void
+schedulerDRANMac::Reset()
+{
+	m_dlAllocationMap.erase(m_dlAllocationMap.begin(), m_dlAllocationMap.end());
+	m_subbandsAsigUEs.erase(m_subbandsAsigUEs.begin(), m_subbandsAsigUEs.end());
+	m_subbandasUeMap.erase(m_subbandasUeMap.begin(), m_subbandasUeMap.end());
+}
+
+
+
+///// Metodo para activar la bearer de datos para el ue que se va a añadir en la nueva celda
+void
+schedulerDRANMac::ActivateDataRadioBearer(uint16_t rnti, Ptr<LteEnbRrc> enbRrc)
+{
+	// Definimos el tipo de data radio bearer
+    enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VIDEO;
+    EpsBearer bearer (q);
+
+    EpcEnbS1SapUser::DataRadioBearerSetupRequestParameters params;
+    params.rnti = rnti;
+    params.bearer = bearer;
+    params.bearerId = 0;
+    params.gtpTeid = 0; // don't care
+    enbRrc->GetS1SapUser ()->DataRadioBearerSetupRequest (params);
 }
 
 void
@@ -2607,7 +2316,7 @@ schedulerDRANMac::DoSchedUlTriggerReq (const struct FfMacSchedSapProvider::Sched
   std::vector <uint16_t> rbgAllocationMap; // Vector de long el numero de RBs que hayan sido asignados mediante RACH y que almacenara el RNTI asignado a esos RBs
   // update with RACH allocation map
   rbgAllocationMap = m_rachAllocationMap; // Actualizamos el vector de RNTIs/RBs con lo obtenido tras la asignacion RACH en el DL
-  //rbgAllocationMap.resize (m_cschedCellConfig.m_ulBandwidth, 0);
+  //rbgm_dlAllocationMap.resize (m_cschedCellConfig.m_ulBandwidth, 0);
   m_rachAllocationMap.clear ();
   m_rachAllocationMap.resize (m_cschedCellConfig.m_ulBandwidth, 0);
 
@@ -2732,7 +2441,7 @@ schedulerDRANMac::DoSchedUlTriggerReq (const struct FfMacSchedSapProvider::Sched
     {
       if (ret.m_dciList.size () > 0) // Pasamos la decision del scheduler de los usuarios que hayan sido asignados por HARQ (m_dciList > 0)
         {
-          m_allocationMaps.insert (std::pair <uint16_t, std::vector <uint16_t> > (params.m_sfnSf, rbgAllocationMap)); // Introduce en el mapa m_allocationMaps, la trama-subtrama y los RNTIs ya scheduled
+          m_allocationMaps.insert (std::pair <uint16_t, std::vector <uint16_t> > (params.m_sfnSf, rbgAllocationMap)); // Introduce en el mapa m_m_dlAllocationMaps, la trama-subtrama y los RNTIs ya scheduled
           m_schedSapUser->SchedUlConfigInd (ret); // Pasa la decisión de scheduler a la capa MAC
         }
 
@@ -2879,7 +2588,7 @@ schedulerDRANMac::DoSchedUlTriggerReq (const struct FfMacSchedSapProvider::Sched
 //            {
 //              m_schedSapUser->SchedUlConfigInd (ret);
 //            }
-//          m_allocationMaps.insert (std::pair <uint16_t, std::vector <uint16_t> > (params.m_sfnSf, rbgAllocationMap));
+//          m_m_dlAllocationMaps.insert (std::pair <uint16_t, std::vector <uint16_t> > (params.m_sfnSf, rbgm_dlAllocationMap));
 //          return;
           break;
         }

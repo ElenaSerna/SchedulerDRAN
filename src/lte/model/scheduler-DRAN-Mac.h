@@ -34,6 +34,8 @@
 #include <ns3/lte-enb-rrc.h>
 #include <ns3/lte-enb-phy.h>
 #include <ns3/lte-phy.h>
+#include <ns3/Objetos.h>
+
 
 
 // value for SINR outside the range defined by FF-API, used to indicate that there
@@ -45,6 +47,9 @@
 #define HARQ_DL_TIMEOUT 11
 
 namespace ns3 {
+
+class Objetos;
+class LteEnbRrc;
 
 
 typedef std::vector < uint8_t > DlHarqProcessesStatus_t;
@@ -65,6 +70,7 @@ struct schedulerDRANFlowPerf_t
   double lastAveragedThroughput;
 };
 
+///////// AÑADIDO PARA ALMACENAR LAS METRICAS QUE NECESITA EL SCHEDULER ////////
 struct metricas_Rij
 {
   std::vector <uint8_t> mcs;
@@ -72,6 +78,7 @@ struct metricas_Rij
   std::vector <double> achievableRate;
   double lastAveragedThroughput;
 };
+///////////////////////////////////////////////////////////////////////////////
 
 /**
  * \ingroup ff-api
@@ -114,28 +121,6 @@ public:
   friend class LteEnbRrc;
 
   void TransmissionModeConfigurationUpdate (uint16_t rnti, uint8_t txMode);
-
-//  static const char *scheduling_path_results;
-//  static T_UL_DL ULDL;
-//  static int Nsubf;
-//  static int Nsubf_promedia;
-//  static int Nsubbands;
-//  static int Nsubbands_CQI;
-//  static int NRB;
-//  static int TruncCQI;
-//  static int Debug;
-//  static unsigned int Semilla;
-//  static int Scheduler_type;
-//  static double Sinr_gain_min;
-//  static double Sinr_gain_max;
-//  static int Sinr_gain_points;
-//  static int Schedgain_sector_file;
-//  static double *SINR_avg;
-//  static double **Ganancias;
-//  static int NSectores;
-//  static int Nusers;
-
-//  static int Nsubbands_user; // Numero de subbandas maximo que puede tener un usuario (adyacentes o no)
 
 private:
   //
@@ -184,8 +169,14 @@ private:
   // Suponemos que para 5G se definirá esta relación para obtener más precisión en la estimación del canal.
   // Ahora mismo LTE considera una asignación 1 RBG a 2 tamaño de las subbandas --> BW de estimación de 1.4 MHz para un ancho de banda de 20 MHz, es muy grande los valores de SNR pueden variar mucho
   int GetRbgSize (int dlbandwidth); 
+
+  //////// METODOS AÑADIDOS ////////
   // Consideraremos un total de 25 subbandas -> 25 RBGs
   void SetMetricasRij(int subbandas, int subbandaSize); // Generar el mapa de metricas Rij
+  void AssignUe(uint16_t ue, uint16_t subband);
+  void Reset();
+  void ActivateDataRadioBearer(uint16_t rnti, Ptr<LteEnbRrc> enbRrc);
+  /////////////////////////////////
 
   int LcActivePerFlow (uint16_t rnti); // Obtener el número de LC activos por flujo (para tx/ re-tx)
 
@@ -224,9 +215,6 @@ private:
   /*
    * Vectors of UE's LC info
   */
-  // std::map <First, Last> name --> Crea un map container con tantos elementos como se indica en el rango [First, last)
-  // incluyendo el elemento señalado por first pero no elemento señalado por last
-  // con cada elemento construido a partir de su elemento correspondiente en ese intervalo
   std::map <LteFlowId_t, FfMacSchedSapProvider::SchedDlRlcBufferReqParameters> m_rlcBufferReq; // Objetos de tipo SchedDlRlc... con índices LteFlowId_t ??
   // Contenedor asociativo, asocian el valor Last con una determinada palabra clave, first
 
@@ -258,11 +246,6 @@ private:
   * Map of UE's timers on DL CQI A30 received
   */
   std::map <uint16_t,uint32_t> m_a30CqiTimers;
-
-  /*
-  * Map of UE's metrics
-  */
-  std::map <uint16_t, metricas_Rij> m_metricasUEs; // Mapa que contiene las metricas (por subbanda) para cada usuario
 
   /*
   * Map of previous allocated UE per RBG --> sfnSf-usuarios(RNTI)
@@ -307,8 +290,6 @@ private:
 
   std::map <uint16_t,uint8_t> m_uesTxMode; // txMode of the UEs
 
-  int m_Nsubbands_user; // Numero maximo de subbandas por UE
-
   // HARQ attributes
   /**
   * m_harqOn when false inhibit te HARQ mechanisms (by default active)
@@ -337,12 +318,27 @@ private:
   std::vector <uint16_t> m_rachAllocationMap;
   uint8_t m_ulGrantMcs; // MCS for UL grant (default 0)
 
+
+  //////////////////// PARAMETROS AÑADIDOS //////////////////////////
+
+  int m_Nsubbands_user; // Numero maximo de subbandas por UE
+
+  std::map <uint16_t, metricas_Rij> m_metricasUEs; // Mapa que contiene las metricas (por subbanda) para cada usuario
+
+    // Parametros para gestionar las asignaciones
+  std::map <uint16_t, std::vector <uint16_t> > m_dlAllocationMap; // RBGs map per RNTI --> nuestro usuario-subbandas_asignadas
+  std::map <uint16_t, std::vector <uint16_t> > m_subbandasUeMap; // subbandas_asignadas - UEs
+  std::map <uint16_t, uint16_t> m_subbandsAsigUEs; // Mapa con el numero de subbandas que han sido asignadas a cada UE, contador de subbandas -> no puede superar al maximo subbandas por UE
+  std::vector <bool> m_rbgMap;  // global RBGs map --> subbandas libres
+
   // Generar ficheros
   bool m_generateFiles; // variable indicando si genera los ficheros de salida
   FILE * m_pSchedFile;
   FILE* m_pMatrizCQIFile;
   FILE* m_pMatrizMetricasFile;
   FILE * m_pSchedFileDet;
+
+  //////////////////////////////////////////////////////////////////
 
 };
 
